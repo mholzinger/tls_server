@@ -68,6 +68,7 @@ openssl req -new \
     -x509 -nodes \
     -rand ${CAROOT}/.rand \
     -newkey rsa:2048 \
+    -sha256 \
     -subj "/C=US/ST=WA/L=Seattle/O=github\ user/OU=FIPS\ test\ CA/CN=fips.localhost/emailAddress=gituser@email-address.com" \
     -days $expire_days -keyout ${CAROOT}/private/ca_key.pem \
     -out ${CAROOT}/certs/ca_cert.pem \
@@ -82,6 +83,7 @@ openssl req \
     -rand ${CAROOT}/private/.rand \
     -new \
     -newkey rsa:2048 \
+    -sha256 \
     -nodes \
     -keyout ${CAROOT}/private/server_key.pem \
     -out ${CAROOT}/certs/server_csr.pem \
@@ -106,6 +108,7 @@ openssl req \
     -rand ${CAROOT}/private/.rand \
     -new \
     -newkey rsa:2048 \
+    -sha256 \
     -nodes \
     -keyout ${CAROOT}/private/client_key.pem \
     -subj "/C=US/ST=WA/L=Seattle/O=github\ user/OU=FIPS\ test\ CA/CN=tlclient.localhost/emailAddress=gituser@email-address.com" \
