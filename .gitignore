@@ -1,5 +1,6 @@
 *.o
 crt
+.project
 .cproject
 tls_server
 .settings
