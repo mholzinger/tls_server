@@ -1,7 +1,9 @@
 #include "tls_server.h"
 
-SSL_CTX* gpSslCtx;
+SSL_CTX* global_ssl_ctx;
 int gi_fips_mode;
+
+/* set to print prog output to stdout */
 int verbose_flag = 1;
 
 int main(int argc, char** argv)
@@ -10,7 +12,7 @@ int main(int argc, char** argv)
     int client_socket = 0;
     int irc = 0;
 
-    SSL* pSsl = NULL;
+    SSL* stack_ssl_ctx = NULL;
 
     /* Set FIPS mode */
     set_fips(); if (gi_fips_mode != 1) goto Error;
@@ -21,22 +23,22 @@ int main(int argc, char** argv)
 
     /* Build SSL/TLS context structure */
     tls_init();
-    if (gpSslCtx == NULL) goto Error;
+    if (global_ssl_ctx == NULL) goto Error;
 
     /* Load x509 certificates into struct */
     load_certs();
-    if (gpSslCtx == NULL) goto Error;
+    if (global_ssl_ctx == NULL) goto Error;
 
     while (true)
     {
-        pSsl = tls_accept(server_socket, client_socket);
-        if (!pSsl)
+        stack_ssl_ctx = tls_accept(server_socket, client_socket);
+        if (!stack_ssl_ctx)
         {
             client_socket = close_socket(client_socket);
             continue;
         }
 
-        verify_certs(pSsl);
+        verify_certs(stack_ssl_ctx);
 
         v_print("info: close client socket connection");
         client_socket = close_socket(client_socket);
@@ -46,12 +48,12 @@ int main(int argc, char** argv)
     Error:
     client_socket = close_socket(client_socket);
     server_socket = close_socket(server_socket);
-    tls_cleanup(pSsl);
+    tls_cleanup(stack_ssl_ctx);
     v_print("exit status :<error>");
     return irc;
 }
-
 /*----------------------------------------------------------------------------*/
+
 int close_socket(int socket)
 {
     if (socket != closed_socket)
@@ -88,7 +90,7 @@ void load_certs(void)
 
     /* Load server signed cert into CTX */
     v_print("info: Loading server cert into CTX struct");
-    irc = SSL_CTX_use_certificate_file(gpSslCtx, (const char*)cert,
+    irc = SSL_CTX_use_certificate_file(global_ssl_ctx, (const char*)cert,
         SSL_FILETYPE_PEM);
     if (irc != 1)
     {
@@ -103,7 +105,7 @@ void load_certs(void)
 
     /* Load server private key into the context */
     v_print("info: Loading server private key into CTX struct");
-    irc = SSL_CTX_use_PrivateKey_file(gpSslCtx, (const char*)key,
+    irc = SSL_CTX_use_PrivateKey_file(global_ssl_ctx, (const char*)key,
         SSL_FILETYPE_PEM);
     if (irc != 1)
     {
@@ -115,7 +117,7 @@ void load_certs(void)
 
     /* Check if the server cert and the private-key match */
     v_print("info: Checking server cert matches private key");
-    irc = SSL_CTX_check_private_key((const SSL_CTX*)gpSslCtx);
+    irc = SSL_CTX_check_private_key((const SSL_CTX*)global_ssl_ctx);
     if (irc != 1)
     {
         v_print("Error <10>: SSL_CTX_check_private_key() failed for "
@@ -126,7 +128,7 @@ void load_certs(void)
 
     /* Load trusted CA for client certificate into context */
     v_print("info: Loading CA cert into CTX struct");
-    irc = SSL_CTX_load_verify_locations(gpSslCtx, (const char*)ca_cert,
+    irc = SSL_CTX_load_verify_locations(global_ssl_ctx, (const char*)ca_cert,
         (const char*)certs_directory);
     if (irc != 1)
     {
@@ -140,14 +142,14 @@ void load_certs(void)
     iMode = SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
     iVerifyDepth = 1;
 
-    SSL_CTX_set_verify(gpSslCtx, iMode, NULL);
-    SSL_CTX_set_verify_depth(gpSslCtx, iVerifyDepth);
+    SSL_CTX_set_verify(global_ssl_ctx, iMode, NULL);
+    SSL_CTX_set_verify_depth(global_ssl_ctx, iVerifyDepth);
 
     /* No errors - everyone is happy! */
     return;
 
     Error:
-    gpSslCtx = NULL;
+    global_ssl_ctx = NULL;
     return;
 }
 
@@ -188,7 +190,7 @@ SSL* tls_accept(int server_socket, int client_socket)
 {
     int irc = 0;
     BIO* pSbio = NULL;
-    SSL* pSsl = NULL;
+    SSL* stack_ssl_ctx = NULL;
 //    int client_socket = 0;
 
     struct sockaddr_in stClientSockAddr;
@@ -217,30 +219,30 @@ SSL* tls_accept(int server_socket, int client_socket)
     }
 
     /* Create SSL struct for this connection */
-    pSsl = SSL_new(gpSslCtx);
-    if (pSsl == NULL)
+    stack_ssl_ctx = SSL_new(global_ssl_ctx);
+    if (stack_ssl_ctx == NULL)
     {
         v_print("error <14>: SSL_new() failed to allocate new SSL structure");
         goto Error;
     }
 
     /* Connect the SSL object with a BIO */
-    SSL_set_bio(pSsl, pSbio, pSbio);
+    SSL_set_bio(stack_ssl_ctx, pSbio, pSbio);
 
     /* SSL_accept */
-    irc = SSL_accept(pSsl);
+    irc = SSL_accept(stack_ssl_ctx);
     if (irc != 1)
     {
         v_print("error <15>: SSL_accept() error, accept failed");
         print_ssl_error_stack();
         goto Error;
     }
-    return pSsl;
+    return stack_ssl_ctx;
 
     Error:
-    tls_cleanup(pSsl);
-    pSsl = NULL;
-    return pSsl;
+    tls_cleanup(stack_ssl_ctx);
+    stack_ssl_ctx = NULL;
+    return stack_ssl_ctx;
 }
 
 /*----------------------------------------------------------------------------*/
@@ -308,7 +310,7 @@ void tls_init(void)
     char* session_cipher = "AES128-SHA:AES256-SHA";
     int irc = 0;
 
-    SSL_METHOD* SSL_method_pointer;
+    const SSL_METHOD* SSL_method_pointer;
 
     v_print("info: ssl server started by User ID <%d>", (int)getuid());
 
@@ -326,8 +328,8 @@ void tls_init(void)
     }
 
     v_print("info: calling for new SSL_CTX method pointer");
-    gpSslCtx = SSL_CTX_new(SSL_method_pointer);
-    if (gpSslCtx == NULL)
+    global_ssl_ctx = SSL_CTX_new(SSL_method_pointer);
+    if (global_ssl_ctx == NULL)
     {
         v_print("error <6>: SSL_CTX_new() failed to allocate pointer");
         goto Error;
@@ -335,11 +337,11 @@ void tls_init(void)
 
     /* Create context */
     v_print("info: disabling session caching");
-    (void)SSL_CTX_set_session_cache_mode(gpSslCtx, (long)SSL_SESS_CACHE_OFF);
+    (void)SSL_CTX_set_session_cache_mode(global_ssl_ctx, (long)SSL_SESS_CACHE_OFF);
 
 
     v_print("info: restricting cipher list to <%s>", session_cipher);
-    irc = SSL_CTX_set_cipher_list(gpSslCtx, session_cipher);
+    irc = SSL_CTX_set_cipher_list(global_ssl_ctx, session_cipher);
     if (!irc)
     {
         v_print("error <7>: SSL_CTX_set_cipher_list failed");
@@ -351,25 +353,23 @@ void tls_init(void)
     return;
 
     Error:
-    gpSslCtx = NULL;
+    global_ssl_ctx = NULL;
     return;
 }
 
 /*----------------------------------------------------------------------------*/
-void tls_cleanup(SSL* pSsl)
+void tls_cleanup(SSL* stack_ssl_ctx)
 {
-    if (pSsl)
+    if (stack_ssl_ctx)
     {
-        /* SSL_shutdown */
-        if (SSL_shutdown(pSsl) == -1)
+        if (SSL_shutdown(stack_ssl_ctx) == -1)
         {
             v_print("error <21>: SSL_Shutdown error");
             print_ssl_error_stack();
         }
-        /* SSL_free */
         v_print("info : SSL_free()");
-        SSL_free(pSsl);
-        pSsl = NULL;
+        SSL_free(stack_ssl_ctx);
+        stack_ssl_ctx = NULL;
     }
 
     ERR_remove_state(0);
@@ -390,7 +390,7 @@ void v_print(const char* output, ...)
     vsprintf(msg_string, output, args);
     va_end(args);
 
-    /* Append newline char */
+    /* Append newline char; NULL terminate */
     array_count = (int)strlen(msg_string);
     msg_string[array_count++] = 0x0a;
     msg_string[array_count] = 0x00;
@@ -399,13 +399,13 @@ void v_print(const char* output, ...)
 }
 
 /*----------------------------------------------------------------------------*/
-void verify_certs(SSL* pSsl)
+void verify_certs(SSL* stack_ssl_ctx)
 {
     X509* pX509ClientCert = NULL;
     long lRc = 0;
 
     v_print("info: get peer certificate");
-    pX509ClientCert = SSL_get_peer_certificate((const SSL*)pSsl);
+    pX509ClientCert = SSL_get_peer_certificate((const SSL*)stack_ssl_ctx);
     if (pX509ClientCert == NULL)
     {
         v_print("error <16>: SSL_get_peer_certificate() failed (returned NULL)");
@@ -415,7 +415,7 @@ void verify_certs(SSL* pSsl)
 
     /* SSL_get_verify_result */
     v_print("info: verify certificate results");
-    lRc = SSL_get_verify_result((const SSL*)pSsl);
+    lRc = SSL_get_verify_result((const SSL*)stack_ssl_ctx);
     if (lRc != X509_V_OK)
     {
         v_print("error <17>: SSL_get_verify_result failed to return "
@@ -432,7 +432,7 @@ void verify_certs(SSL* pSsl)
 
     Error:
     pX509ClientCert = NULL;
-    pSsl = NULL;
+    stack_ssl_ctx = NULL;
     return;
 }
 

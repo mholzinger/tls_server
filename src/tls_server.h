@@ -24,7 +24,7 @@ void load_certs(void);
 void set_fips(void);
 void print_ssl_error_stack(void);
 int tcp_init(void);
-SSL* tls_accept(int iServerSocket, int iClientSocket);
+SSL* tls_accept(int server_socket, int client_socket);
 void tls_init(void);
 void tls_cleanup(SSL* pSsl);
 void v_print(const char* output, ...);
